@@ -3,75 +3,71 @@ local Words, UsedWords, Missing, Rejected, Blocklist = {}, {}, {}, {}, {}
 local LastLetters = ""
 local debounce = false
 
--- ========== REALISTIC QWERTY NEIGHBORS (3-4 per key, including diagonals) ==========
+-- ========== SAFE KEY FUNCTION WRAPPERS ==========
+local function safeKeypress(key)
+    if keypress then
+        keypress(key)
+        return true
+    elseif presskey then
+        presskey(key)
+        return true
+    end
+    return false
+end
+
+local function safeKeyrelease(key)
+    if keyrelease then
+        keyrelease(key)
+        return true
+    elseif releasekey then
+        releasekey(key)
+        return true
+    end
+    return false
+end
+
+local function safeIsKeyPressed(key)
+    if iskeypressed then
+        return iskeypressed(key)
+    elseif iskeypress then
+        return iskeypress(key)
+    end
+    return false
+end
+
+-- ========== REALISTIC QWERTY NEIGHBORS ==========
 local NEIGHBORS = {
-    -- Top row
-    ['q'] = {'w', 'a'},                                          -- 2 neighbors (edge)
-    ['w'] = {'q', 'e', 'a', 's'},                                -- 4 neighbors
-    ['e'] = {'w', 'r', 's', 'd'},                                -- 4 neighbors
-    ['r'] = {'e', 't', 'd', 'f'},                                -- 4 neighbors
-    ['t'] = {'r', 'y', 'f', 'g'},                                -- 4 neighbors
-    ['y'] = {'t', 'u', 'g', 'h'},                                -- 4 neighbors
-    ['u'] = {'y', 'i', 'h', 'j'},                                -- 4 neighbors
-    ['i'] = {'u', 'o', 'j', 'k'},                                -- 4 neighbors
-    ['o'] = {'i', 'p', 'k', 'l'},                                -- 4 neighbors
-    ['p'] = {'o', 'l'},                                          -- 2 neighbors (edge)
-    
-    -- Home row
-    ['a'] = {'q', 'w', 's', 'z'},                                -- 4 neighbors
-    ['s'] = {'w', 'e', 'a', 'd', 'z', 'x'},                      -- 6 neighbors (center, most mistakes)
-    ['d'] = {'e', 'r', 's', 'f', 'x', 'c'},                      -- 6 neighbors
-    ['f'] = {'r', 't', 'd', 'g', 'c', 'v'},                      -- 6 neighbors
-    ['g'] = {'t', 'y', 'f', 'h', 'v', 'b'},                      -- 6 neighbors
-    ['h'] = {'y', 'u', 'g', 'j', 'b', 'n'},                      -- 6 neighbors
-    ['j'] = {'u', 'i', 'h', 'k', 'n', 'm'},                      -- 6 neighbors
-    ['k'] = {'i', 'o', 'j', 'l', 'm'},                           -- 5 neighbors
-    ['l'] = {'o', 'p', 'k'},                                     -- 3 neighbors
-    
-    -- Bottom row
-    ['z'] = {'a', 's', 'x'},                                     -- 3 neighbors
-    ['x'] = {'s', 'd', 'z', 'c'},                                -- 4 neighbors
-    ['c'] = {'d', 'f', 'x', 'v'},                                -- 4 neighbors
-    ['v'] = {'f', 'g', 'c', 'b'},                                -- 4 neighbors
-    ['b'] = {'g', 'h', 'v', 'n'},                                -- 4 neighbors
-    ['n'] = {'h', 'j', 'b', 'm'},                                -- 4 neighbors
-    ['m'] = {'j', 'k', 'n'},                                     -- 3 neighbors
+    ['q'] = {'w', 'a'}, ['w'] = {'q', 'e', 'a', 's'},
+    ['e'] = {'w', 'r', 's', 'd'}, ['r'] = {'e', 't', 'd', 'f'},
+    ['t'] = {'r', 'y', 'f', 'g'}, ['y'] = {'t', 'u', 'g', 'h'},
+    ['u'] = {'y', 'i', 'h', 'j'}, ['i'] = {'u', 'o', 'j', 'k'},
+    ['o'] = {'i', 'p', 'k', 'l'}, ['p'] = {'o', 'l'},
+    ['a'] = {'q', 'w', 's', 'z'}, ['s'] = {'w', 'e', 'a', 'd', 'z', 'x'},
+    ['d'] = {'e', 'r', 's', 'f', 'x', 'c'}, ['f'] = {'r', 't', 'd', 'g', 'c', 'v'},
+    ['g'] = {'t', 'y', 'f', 'h', 'v', 'b'}, ['h'] = {'y', 'u', 'g', 'j', 'b', 'n'},
+    ['j'] = {'u', 'i', 'h', 'k', 'n', 'm'}, ['k'] = {'i', 'o', 'j', 'l', 'm'},
+    ['l'] = {'o', 'p', 'k'}, ['z'] = {'a', 's', 'x'},
+    ['x'] = {'s', 'd', 'z', 'c'}, ['c'] = {'d', 'f', 'x', 'v'},
+    ['v'] = {'f', 'g', 'c', 'b'}, ['b'] = {'g', 'h', 'v', 'n'},
+    ['n'] = {'h', 'j', 'b', 'm'}, ['m'] = {'j', 'k', 'n'},
 }
 
 -- ========== TYPO CONFIGURATION ==========
 local TYPO_CONFIG = {
-    baseAccuracy = 0.97,  -- ~1 typo per 33 words
+    typoChancePerWord = 0.18,  -- ~1 in 5-6 words
     
-    lengthMultiplier = {
-        [1] = 0.99, [2] = 0.99, [3] = 0.98,
-        [4] = 0.96, [5] = 0.94, [6] = 0.92,
-        [7] = 0.89, [8] = 0.86, [9] = 0.83,
-        [10] = 0.80,
+    lengthModifier = {
+        [1] = 0.3, [2] = 0.3, [3] = 0.5, [4] = 0.8, [5] = 1.0,
+        [6] = 1.2, [7] = 1.5, [8] = 1.8, [9] = 2.0, [10] = 2.2,
     },
     
-    -- Typo type probabilities (realistic distribution)
     typoOdds = {
-        singleNeighbor = 0.65,   -- Most common: one wrong adjacent key
-        doublePress = 0.15,      -- Fat-fingered two keys at once
-        omission = 0.08,         -- Missed a letter entirely
-        repetition = 0.07,       -- Finger stutter (gg instead of g)
-        transposition = 0.05,    -- Swapped two letters (hte vs the)
+        singleNeighbor = 0.65, doublePress = 0.15, omission = 0.08,
+        repetition = 0.07, transposition = 0.05,
     },
     
-    -- Reaction times for catching typos (seconds)
-    reactionTimes = {
-        instant = 0.03,   -- 5% - knew immediately
-        fast = 0.09,      -- 20% - quick catch
-        normal = 0.17,    -- 45% - average human
-        slow = 0.28,      -- 25% - slow realization
-        spaced = 0.48,    -- 5% - completely spaced
-    },
-    
-    -- Typing speed
-    baseDelay = 0.05,
-    shortWordBonus = 0.02,
-    longWordPenalty = 0.03,
-    randomVariation = 0.06,
+    reactionTimes = { instant = 0.03, fast = 0.09, normal = 0.17, slow = 0.28, spaced = 0.48 },
+    baseDelay = 0.05, shortWordBonus = 0.02, longWordPenalty = 0.03, randomVariation = 0.06,
 }
 
 local keys = {}
@@ -79,24 +75,15 @@ for i = 0,25 do keys[string.char(97+i)] = 0x41 + i end
 local BACKSPACE, ENTER = 0x08, 0x0D
 
 -- ========== HELPER FUNCTIONS ==========
-
 local function getWordLengthCategory(len)
-    if len <= 3 then return 1
-    elseif len <= 4 then return 2
-    elseif len <= 5 then return 3
-    elseif len <= 6 then return 4
-    elseif len <= 7 then return 5
-    elseif len <= 8 then return 6
-    elseif len <= 9 then return 7
-    elseif len <= 10 then return 8
-    else return 9 end
+    if len <= 3 then return 1 elseif len <= 4 then return 2 elseif len <= 5 then return 3
+    elseif len <= 6 then return 4 elseif len <= 7 then return 5 elseif len <= 8 then return 6
+    elseif len <= 9 then return 7 elseif len <= 10 then return 8 else return 9 end
 end
 
 local function getNeighbor(letter)
     local neighbors = NEIGHBORS[letter]
-    if neighbors and #neighbors > 0 then
-        return neighbors[math.random(1, #neighbors)]
-    end
+    if neighbors and #neighbors > 0 then return neighbors[math.random(1, #neighbors)] end
     return letter
 end
 
@@ -105,13 +92,10 @@ local function getReactionDelay()
     local probs = {0.05, 0.20, 0.45, 0.25, 0.05}
     local roll = math.random()
     local cumulative = 0
-    
     for i, prob in ipairs(probs) do
         cumulative = cumulative + prob
         if roll <= cumulative then
-            local delay = TYPO_CONFIG.reactionTimes[types[i]]
-            delay = delay + (math.random() * 0.04)
-            return delay
+            return TYPO_CONFIG.reactionTimes[types[i]] + (math.random() * 0.04)
         end
     end
     return 0.17
@@ -120,12 +104,10 @@ end
 local function shouldMakeTypo(word)
     local len = #word
     local lenCat = getWordLengthCategory(len)
-    local accuracy = TYPO_CONFIG.lengthMultiplier[lenCat] or 0.80
-    local roll = math.random()
-    return roll > accuracy
+    local modifier = TYPO_CONFIG.lengthModifier[lenCat] or 1.0
+    local finalChance = math.min(0.45, TYPO_CONFIG.typoChancePerWord * modifier)
+    return math.random() < finalChance
 end
-
--- ========== REALISTIC TYPO GENERATION ==========
 
 local function generateTypo(word)
     local len = #word
@@ -133,141 +115,100 @@ local function generateTypo(word)
     
     local roll = math.random()
     local typoType = "singleNeighbor"
-    
     local cumulative = 0
     for typo, odds in pairs(TYPO_CONFIG.typoOdds) do
         cumulative = cumulative + odds
-        if roll <= cumulative then
-            typoType = typo
-            break
-        end
+        if roll <= cumulative then typoType = typo break end
     end
     
     local pos = math.random(1, len)
     
-    -- SINGLE NEIGHBOR TYPO (most common)
     if typoType == "singleNeighbor" then
         local original = word:sub(pos, pos)
         local wrong = getNeighbor(original)
         if wrong and wrong ~= original then
             return word:sub(1, pos-1) .. wrong .. word:sub(pos+1)
         end
-        
-    -- DOUBLE PRESS (fat-fingered two keys at once)
-    elseif typoType == "doublePress" and len >= 2 and pos <= len then
+    elseif typoType == "doublePress" and len >= 2 then
         local original = word:sub(pos, pos)
         local neighbor = getNeighbor(original)
         if neighbor and neighbor ~= original then
-            -- Two keys pressed: original + neighbor (or neighbor + original)
             if math.random() < 0.5 then
                 return word:sub(1, pos-1) .. original .. neighbor .. word:sub(pos+1)
             else
                 return word:sub(1, pos-1) .. neighbor .. original .. word:sub(pos+1)
             end
         end
-        
-    -- OMISSION (missed a letter)
     elseif typoType == "omission" and len >= 2 then
         return word:sub(1, pos-1) .. word:sub(pos+1)
-        
-    -- REPETITION (finger stutter)
     elseif typoType == "repetition" and len <= 10 then
         local repeatLetter = word:sub(pos, pos)
-        if pos == len then
-            return word .. repeatLetter
-        else
-            return word:sub(1, pos) .. repeatLetter .. word:sub(pos+1)
-        end
-        
-    -- TRANSPOSITION (swapped adjacent letters)
+        if pos == len then return word .. repeatLetter
+        else return word:sub(1, pos) .. repeatLetter .. word:sub(pos+1) end
     elseif typoType == "transposition" and len >= 2 and pos < len then
         return word:sub(1, pos-1) .. word:sub(pos+1, pos+1) .. word:sub(pos, pos) .. word:sub(pos+2)
     end
-    
     return word
 end
 
--- ========== TYPING FUNCTION WITH REALISTIC TYPOS ==========
-
+-- ========== TYPING FUNCTION ==========
 local function typeWordWithTypos(word)
     local shouldTypo = shouldMakeTypo(word)
     local typedWord = word
     local hadTypo = false
-    local typoType = nil
     
     if shouldTypo then
         typedWord = generateTypo(word)
         hadTypo = typedWord ~= word
-        if hadTypo then
-            -- Brief pause before realizing (or not realizing immediately)
-            wait(0.05 + math.random() * 0.08)
-        end
+        if hadTypo then wait(0.05 + math.random() * 0.08) end
     end
     
-    -- Calculate typing speed
     local len = #word
     local delayPerChar = TYPO_CONFIG.baseDelay
-    if len <= 3 then
-        delayPerChar = delayPerChar - TYPO_CONFIG.shortWordBonus
-    elseif len >= 7 then
-        delayPerChar = delayPerChar + TYPO_CONFIG.longWordPenalty * (len - 6) / 4
-    end
+    if len <= 3 then delayPerChar = delayPerChar - TYPO_CONFIG.shortWordBonus
+    elseif len >= 7 then delayPerChar = delayPerChar + TYPO_CONFIG.longWordPenalty * (len - 6) / 4 end
     local variation = (math.random() * TYPO_CONFIG.randomVariation * 2) - TYPO_CONFIG.randomVariation
     delayPerChar = math.max(0.035, math.min(0.14, delayPerChar + variation))
     
-    -- Type the word (or typo version)
     for i = 1, #typedWord do
         local c = typedWord:sub(i, i)
         if keys[c] then
-            keypress(keys[c])
+            safeKeypress(keys[c])
             wait(delayPerChar + (math.random() * 0.025))
-            keyrelease(keys[c])
+            safeKeyrelease(keys[c])
             wait(0.008)
         end
     end
     
-    -- If typo happened, fix it with realistic reaction time
     if hadTypo then
         local reactionDelay = getReactionDelay()
         wait(reactionDelay)
-        
-        -- Backspace the wrong word
         for i = 1, #typedWord do
-            keypress(BACKSPACE)
+            safeKeypress(BACKSPACE)
             wait(0.035 + math.random() * 0.04)
-            keyrelease(BACKSPACE)
+            safeKeyrelease(BACKSPACE)
             wait(0.015)
         end
-        
-        -- Brief pause before retyping
         wait(0.05 + math.random() * 0.08)
-        
-        -- Retype correctly (slightly slower/careful)
         local correctDelay = delayPerChar * 1.15
         for i = 1, #word do
             local c = word:sub(i, i)
             if keys[c] then
-                keypress(keys[c])
+                safeKeypress(keys[c])
                 wait(correctDelay + (math.random() * 0.035))
-                keyrelease(keys[c])
+                safeKeyrelease(keys[c])
                 wait(0.008)
             end
         end
-        
-        print("🔧 Typo fixed: " .. typedWord .. " → " .. word)
+        print("🔧 Typo: " .. typedWord .. " → " .. word)
     end
     
-    -- Press Enter
     wait(0.04 + math.random() * 0.05)
-    keypress(ENTER)
+    safeKeypress(ENTER)
     wait(0.045 + math.random() * 0.035)
-    keyrelease(ENTER)
+    safeKeyrelease(ENTER)
+    if hadTypo then wait(0.12 + math.random() * 0.1) end
     
-    if hadTypo then
-        wait(0.12 + math.random() * 0.1)
-    end
-    
-    -- Check rejection
     task.spawn(function()
         wait(0.5)
         local new = getfirstletters()
@@ -276,13 +217,10 @@ local function typeWordWithTypos(word)
             print("❌ Rejected: "..word)
         end
     end)
-    
     return hadTypo
 end
 
--- ========== REST OF ORIGINAL FUNCTIONS (getDesktopContainer, isBad, refresh, getfirstletters, findword) ==========
--- [Keeping your existing functions here - they work perfectly]
-
+-- ========== CORE FUNCTIONS ==========
 local function getDesktopContainer()
     local s, r = pcall(function()
         local UI = Player:FindFirstChild("PlayerGui").GameUI.Container.GameSpace.DefaultUI
@@ -307,7 +245,6 @@ local function refresh()
         local s, d = pcall(game.HttpGet, game, link)
         if s then for w in d:gmatch("[^\r\n]+") do table.insert(raw, w:lower()) end end
     end
-    
     Words = {}
     for _, w in ipairs(raw) do if not isBad(w) then table.insert(Words, w) end end
     print("Loaded "..#Words.." words")
@@ -318,11 +255,9 @@ task.spawn(function() while wait(300) do refresh() end end)
 local function getfirstletters()
     local dc = getDesktopContainer()
     if not dc or not dc.InfoFrameContainer then return end
-    
     local letters, counter = {}, 0
     local textFrame = dc.InfoFrameContainer.InfoFrame.TextFrame
     if not textFrame then return end
-    
     for _, v in ipairs(textFrame:GetChildren()) do
         if v.Name == "LetterFrame" then
             counter = counter + 1
@@ -331,25 +266,21 @@ local function getfirstletters()
             end
         end
     end
-    
     return #letters > 0 and letters
 end
 
 local function findword(seq)
     seq = seq:lower()
     local matches = {}
-    
     for _, w in ipairs(Words) do
         if w:find(seq, 1, true) and not UsedWords[w] then
             table.insert(matches, w)
         end
     end
-    
     if #matches == 0 then
         Missing[seq] = true
         return
     end
-    
     table.sort(matches, function(a,b) return #a < #b end)
     local chosen = matches[1]
     UsedWords[chosen] = true
@@ -364,66 +295,43 @@ _G.clearRejected = function() Rejected = {} end
 _G.blockWord = function(w) if w then Blocklist[w:lower()]=true; refresh() end end
 _G.unblockWord = function(w) if w then Blocklist[w:lower()]=nil; refresh() end end
 
--- Typo stats
 local typoStats = { total = 0, typos = 0 }
 _G.showTypoStats = function()
     local rate = typoStats.total > 0 and (typoStats.typos / typoStats.total * 100) or 0
     print(string.format("📊 Typo Stats: %d/%d words (%.1f%% typo rate)", typoStats.typos, typoStats.total, rate))
 end
 _G.resetTypoStats = function() typoStats = { total = 0, typos = 0 } print("Typo stats reset") end
-
-_G.help = function()
-    print("=== REALISTIC TYPO FEATURE ===")
-    print("• Neighbor keys only (QWERTY adjacent)")
-    print("• Double-key fat-finger typos")
-    print("• Variable reaction times")
-    print("• Longer words = more typos + slower")
-    print("\nCommands:")
-    print("showMissing(), clearMissing(), showRejected(), clearRejected()")
-    print("blockWord('word'), unblockWord('word')")
-    print("showTypoStats(), resetTypoStats()")
+_G.setTypoRate = function(rate)
+    TYPO_CONFIG.typoChancePerWord = math.min(0.5, math.max(0.05, rate))
+    print("Typo rate set to " .. (TYPO_CONFIG.typoChancePerWord * 100) .. "%")
 end
 
 -- MAIN LOOP
 _G.active = true
-
 task.spawn(function()
-    local wordCount = 0
     while _G.active do
         wait(0.1)
-        
-        if iskeypressed(0xBA) and not debounce then
+        if safeIsKeyPressed(0xBA) and not debounce then
             debounce = true
-            
             local letters = getfirstletters()
             if letters then
                 local seq = table.concat(letters)
                 LastLetters = seq
                 local word = findword(seq)
                 if word then
-                    wordCount = wordCount + 1
                     local hadTypo = typeWordWithTypos(word)
-                    
                     typoStats.total = typoStats.total + 1
                     if hadTypo then typoStats.typos = typoStats.typos + 1 end
-                    
-                    if wordCount % 25 == 0 then
-                        local rate = (typoStats.typos / typoStats.total * 100)
-                        print(string.format("📈 Current typo rate: %.1f%% (%d/%d)", rate, typoStats.typos, typoStats.total))
-                    end
                 end
             end
-            
-            repeat wait(0.1) until not iskeypressed(0xBA)
+            repeat wait(0.1) until not safeIsKeyPressed(0xBA)
             wait(0.2)
             debounce = false
         end
     end
 end)
 
-print("✅ REALISTIC TYPO ENGINE ACTIVE!")
-print("🎯 ~97% accuracy (1 typo per ~33 words)")
-print("⌨️  Neighbor-key typos only (QWERTY adjacent)")
-print("👆 Double-key fat-finger typos included")
-print("⏱️  Variable reaction times for corrections")
-print("Press ';' (semicolon) to type")
+print("✅ Word Bomb Script Loaded!")
+print("🎯 18% typo rate (~1 in 5-6 words)")
+print("⌨️  Press ';' (semicolon) to type")
+print("📊 Type showTypoStats() for stats, setTypoRate(0.15) to adjust")
