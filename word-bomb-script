@@ -5,7 +5,6 @@ local Words, UsedWords, Missing, Rejected, Blocklist = {}, {}, {}, {}, {}
 local LastLetters = ""
 local debounce = false
 
--- ===== NOTIFICATION FUNCTION (Robust) =====
 local function notify(title, msg)
     pcall(function()
         if _G.notify then
@@ -460,9 +459,6 @@ task.spawn(function()
     end
 end)
 
-print("[Word Bomb] Loaded successfully!")
-
--- Try multiple notification methods
 pcall(function()
     if _G.notify then
         _G.notify("Word Bomb", "Loaded successfully!", 3)
