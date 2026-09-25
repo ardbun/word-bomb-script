@@ -1,11 +1,13 @@
 local Player = game:GetService("Players").LocalPlayer
 local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
 
 local Words, UsedWords, Missing, Rejected, Blocklist = {}, {}, {}, {}, {}
 local LastLetters = ""
 local debounce = false
 local KEYBIND_HEX = 0xBA
 local KEYBIND_LABEL = ";"
+local KEYBIND_ENUM = Enum.KeyCode.Semicolon
 local getfirstletters
 
 local function notify(title, msg)
@@ -454,26 +456,46 @@ _G.setTypoRate = function(rate)
     TYPO_CONFIG.typoChancePerWord = math.min(0.5, math.max(0.0, rate))
 end
 
+local function triggerWordFind()
+    if debounce then return end
+    debounce = true
+    local letters = getfirstletters()
+    if letters then
+        local seq = table.concat(letters)
+        LastLetters = seq
+        local word = findword(seq)
+        if word then
+            typeWordWithTypos(word)
+        end
+    end
+    task.delay(0.2, function()
+        debounce = false
+    end)
+end
+
 _G.active = true
+pcall(function()
+    UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if not _G.active or gameProcessed then return end
+        if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == KEYBIND_ENUM then
+            triggerWordFind()
+        end
+    end)
+end)
+
+local hasExecutorKeyApi = iskeypressed or iskeypress
+local keyHeld = false
 task.spawn(function()
     while _G.active do
         task.wait(0.1)
-        if safeIsKeyPressed(KEYBIND_HEX) and not debounce then
-            debounce = true
-            local letters = getfirstletters()
-            if letters then
-                local seq = table.concat(letters)
-                LastLetters = seq
-                local word = findword(seq)
-                if word then
-                    typeWordWithTypos(word)
-                end
+        if hasExecutorKeyApi then
+            local pressed = safeIsKeyPressed(KEYBIND_HEX)
+            if pressed and not keyHeld then
+                keyHeld = true
+                triggerWordFind()
+            elseif not pressed then
+                keyHeld = false
             end
-            repeat
-                task.wait(0.1)
-            until not safeIsKeyPressed(KEYBIND_HEX)
-            task.wait(0.2)
-            debounce = false
         end
     end
 end)
